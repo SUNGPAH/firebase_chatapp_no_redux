@@ -3,6 +3,7 @@ import {useParams, useHistory} from 'react-router-dom';
 import {db, firebaseApp, firebase} from '../firebase';
 import { BiSend, BiLogOut, BiCommentAdd} from "react-icons/bi";
 import ChatCard from '../components/chats/ChatCard';
+import {useImmer} from 'use-immer';
 
 const Chats = React.memo(({chats, users, uid, onEmojiClick}) => {
   return <>
@@ -18,30 +19,14 @@ const Chats = React.memo(({chats, users, uid, onEmojiClick}) => {
   (prevProps.users === nextProps.users)
 })
 
-const ChatRoom = (props) => {
+const ChatRoomWithImmer = (props) => {
   const history = useHistory();
-  const [chats, setChats] = useState([]);
+  const [chats, setChats] = useImmer([]);
   const [uid, setUid] = useState("");
   const [chatContent, setChatContent] = useState("");
-
-  //immer로 해야 겠군..!
-
-
   const [users, setUsers] = useState({});
   const { channelId } = useParams();
   const messagesEndRef = useRef(null)
-  const [modifyCandidate, setModifyCandidate] = useState(null);
-  const [text, setText] = useState("");
-  const [search, setSearch] = useState("");
-
-  const onClick = () => {
-    setSearch(text);
-  }
-
-  const memoizedText = useMemo(() => {
-    console.log('use memo');
-    return <div>{text} - {search}</div>
-  }, [search])
 
   useEffect(() => {
     firebaseApp.auth().onAuthStateChanged((user) => {
@@ -79,31 +64,22 @@ const ChatRoom = (props) => {
 
   useEffect(() => {
     const chatRef = db.collection('chat').doc('room_' + channelId).collection('messages')
-    chatRef.orderBy("created").get().then((snapshot) => {
-      const data = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setChats(data);
-    })
-  }, [])
-
-  useEffect(() => {
-    const chatRef = db.collection('chat').doc('room_' + channelId).collection('messages')
     chatRef.orderBy("created").onSnapshot((snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const newEntry = change.doc.data();
           newEntry.id = change.doc.id
-          setModifyCandidate(newEntry); 
+          setChats(draft => {
+            draft.push(newEntry);
+          })
         }
         if (change.type === "modified") {
           const data = change.doc.data();
           data.id = change.doc.id
-          setModifyCandidate(data);  
-
-          //여기서 뭔가 바로 해야 하지 않을까 씁다잉.
-          
+          setChats(draft => {
+            const index = draft.findIndex(el => el.id === change.doc.id)
+            draft[index] = data
+          })          
         }
         if (change.type === "removed") {
           console.log("remove message: ", change.doc.data());
@@ -111,25 +87,6 @@ const ChatRoom = (props) => {
       });
     });
   }, [])
-
-  const chatRecords = useMemo(() => {
-    //this part will only be refreshed when modifyCandidate is set.
-    console.log('chat records use memo');
-    if(!modifyCandidate){
-      return chats
-    }
-
-    const copied = [...chats];
-    const index = copied.findIndex(chat => chat.id === modifyCandidate.id)
-    if(index === -1) {
-      copied.push(modifyCandidate)
-    } else {
-      modifyCandidate.id = copied[index].id
-      copied[index] = modifyCandidate
-    }
-    setChats(copied) 
-    return copied
-  }, [modifyCandidate])
 
   useEffect(() => {
     if(chats.length === 0){
@@ -193,15 +150,6 @@ const ChatRoom = (props) => {
   }
 
   return <div style={{position:'relative'}} className="vh100">
-
-    <input value={text} onChange={evt => {setText(evt.target.value)}}/>
-
-    <div onClick={onClick}>??????</div>
-
-    <hr/>
-
-    {memoizedText}
-
     <div className="flex fdr vh100">
       <div className="w200 bg_black p16">
         <div className="color_white flex fdr aic cursor_pointer" onClick={evt => {logout()}}>
@@ -215,7 +163,7 @@ const ChatRoom = (props) => {
       </div>
       <div className="f1 pl16 pt16 pr">
         <div style={{height: 'calc(100% - 50px)', overflowY:'scroll', paddingBottom:50,}}>
-        <Chats chats={chatRecords} users={users} uid={uid} onEmojiClick={onEmojiClick}/>   
+        <Chats chats={chats} users={users} uid={uid} onEmojiClick={onEmojiClick}/>   
         <div style={{ float:"left", clear: "both" }}
           ref={messagesEndRef}>
         </div>
@@ -235,4 +183,4 @@ const ChatRoom = (props) => {
   </div>
 }
 
-export default ChatRoom
+export default ChatRoomWithImmer
