@@ -11,3 +11,4 @@ REACT_APP_projectId=someValue
 REACT_APP_storageBucket=someValue
 REACT_APP_messagingSenderId=someValue
 ```
+

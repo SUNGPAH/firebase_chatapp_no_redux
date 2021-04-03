@@ -1,32 +1,44 @@
-import React, {useEffect, useState, useRef} from 'react';
+import React, {useEffect, useState, useRef, useMemo} from 'react';
 import {useParams, useHistory} from 'react-router-dom';
 import {db, firebaseApp, firebase} from '../firebase';
 import { BiSend, BiLogOut, BiCommentAdd} from "react-icons/bi";
 import ChatCard from '../components/chats/ChatCard';
 
-const Chats = React.memo(({chats, users}) => {
-  console.log('chats rendering');
+const Chats = React.memo(({chats, users, uid, onEmojiClick}) => {
   return <>
     {
     chats.map((chat) => {
       return <div key={chat.id}>
-        <ChatCard chat={chat} users={users} index={chat.id} />
+        <ChatCard chat={chat} users={users} uid={uid} index={chat.id} onEmojiClick={onEmojiClick}/>
       </div>
     })
   }</>
 }, (prevProps, nextProps) => {
-  return (prevProps.chats === nextProps.chats)
+  return (prevProps.chats === nextProps.chats) && 
+  (prevProps.users === nextProps.users)
 })
 
 const ChatRoom = (props) => {
   const history = useHistory();
   const [chats, setChats] = useState([]);
-  const [tempChats, setTempChats] = useState([]);
   const [uid, setUid] = useState("");
   const [chatContent, setChatContent] = useState("");
   const [users, setUsers] = useState({});
   const { channelId } = useParams();
   const messagesEndRef = useRef(null)
+  const [modifyCandidate, setModifyCandidate] = useState(null);
+  const [text, setText] = useState("");
+  const [search, setSearch] = useState("");
+
+  const onClick = () => {
+    setSearch(text);
+  }
+
+  const memoizedText = useMemo(() => {
+    console.log('use memo');
+    //이때 다 가져옴. 즉, search가 바뀔 때에, 현재 있는 스테이트들 다 가져와서 바꾼다는 말.
+    return <div>{text} - {search}</div>
+  }, [search])
 
   useEffect(() => {
     firebaseApp.auth().onAuthStateChanged((user) => {
@@ -64,25 +76,54 @@ const ChatRoom = (props) => {
 
   useEffect(() => {
     const chatRef = db.collection('chat').doc('room_' + channelId).collection('messages')
-    chatRef.orderBy("created").onSnapshot((snapshot) => {
+    chatRef.orderBy("created").get().then((snapshot) => {
       const data = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
-      setTempChats(data);
+      setChats(data);
     })
   }, [])
 
   useEffect(() => {
-    if(tempChats.length > 0){
-      if (tempChats.length === chats.length){
-        return ;
-      }
+    const chatRef = db.collection('chat').doc('room_' + channelId).collection('messages')
+    chatRef.orderBy("created").onSnapshot((snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "added") {
+          const newEntry = change.doc.data();
+          newEntry.id = change.doc.id
+          setModifyCandidate(newEntry); 
+        }
+        if (change.type === "modified") {
+          const data = change.doc.data();
+          data.id = change.doc.id
+          setModifyCandidate(data);  
+        }
+        if (change.type === "removed") {
+          console.log("remove message: ", change.doc.data());
+        }
+      });
+    });
+  }, [])
 
-      let newEntries = tempChats.filter(x => !chats.map(chat => chat.id).includes(x.id));
-      setChats([...chats, ...newEntries]);
+  const chatRecords = useMemo(() => {
+    //this part will only be refreshed when modifyCandidate is set.
+    console.log('chat records use memo');
+    if(!modifyCandidate){
+      return chats
     }
-  }, [tempChats, chats])
+
+    const copied = [...chats];
+    const index = copied.findIndex(chat => chat.id === modifyCandidate.id)
+    if(index === -1) {
+      copied.push(modifyCandidate)
+    } else {
+      modifyCandidate.id = copied[index].id
+      copied[index] = modifyCandidate
+    }
+    setChats(copied) 
+    return copied
+  }, [modifyCandidate])
 
   useEffect(() => {
     if(chats.length === 0){
@@ -122,7 +163,39 @@ const ChatRoom = (props) => {
     history.push('/createChat');
   }
 
+  const onEmojiClick = (emojiKey, chatId) => {    
+    const chatRef = db.collection('chat').doc('room_' + channelId).collection('messages').doc(chatId)
+    chatRef.get().then(doc => {
+      const data = doc.data()      
+      const emojiObj = {...data.emoji};
+      let uids = emojiObj[emojiKey];
+
+      if (uids){
+        if(uids.includes(uid)){
+        }else{
+          uids.push(uid)
+        }
+      }else{
+        uids = [uid]
+      }
+
+      emojiObj[emojiKey] = uids
+      chatRef.update({
+        emoji: emojiObj
+      })  
+    })
+  }
+
   return <div style={{position:'relative'}} className="vh100">
+
+    <input value={text} onChange={evt => {setText(evt.target.value)}}/>
+
+    <div onClick={onClick}>??????</div>
+
+    <hr/>
+
+    {memoizedText}
+
     <div className="flex fdr vh100">
       <div className="w200 bg_black p16">
         <div className="color_white flex fdr aic cursor_pointer" onClick={evt => {logout()}}>
@@ -136,7 +209,7 @@ const ChatRoom = (props) => {
       </div>
       <div className="f1 pl16 pt16 pr">
         <div style={{height: 'calc(100% - 50px)', overflowY:'scroll', paddingBottom:50,}}>
-        <Chats chats={chats} users={users}/>   
+        <Chats chats={chatRecords} users={users} uid={uid} onEmojiClick={onEmojiClick}/>   
         <div style={{ float:"left", clear: "both" }}
           ref={messagesEndRef}>
         </div>
